@@ -2,9 +2,12 @@ package com.yupi.mojcodesandbox.utils;
 
 import cn.hutool.core.util.StrUtil;
 import com.yupi.mojcodesandbox.model.ExecuteMessage;
+import org.apache.tomcat.util.buf.StringUtils;
 import org.springframework.util.StopWatch;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 进程工具类
@@ -29,27 +32,37 @@ public class ProcessUtils {
             if (exitVal == 0) {
                 System.out.println(optName + "成功");
                 // 分批获取进程的正常输出流
-                BufferedReader reader = new BufferedReader(new InputStreamReader(runProcess.getInputStream()));
-                String compileMsgLine;
-                StringBuilder compileStringBuilder = new StringBuilder();
-                // 逐行读取编译输出
-                while ((compileMsgLine = reader.readLine()) != null) {
-                    compileStringBuilder.append(compileMsgLine);
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(runProcess.getInputStream()));
+                List<String> outputStrList = new ArrayList<>();
+                // 逐行读取
+                String compileOutputLine;
+                while ((compileOutputLine = bufferedReader.readLine()) != null) {
+                    outputStrList.add(compileOutputLine);
                 }
-                executeMessage.setMessage(compileStringBuilder.toString());
+                executeMessage.setMessage(StringUtils.join(outputStrList, '\n'));
             } else {
                 System.out.println(optName + "失败，错误码：" + exitVal);
 
-                // 分批获取进程的错误输出流
-                BufferedReader reader = new BufferedReader(new InputStreamReader(runProcess.getErrorStream()));
-                String compileMsgLine;
-                StringBuilder compileStringBuilder = new StringBuilder();
-                // 逐行读取编译输出
-                while ((compileMsgLine = reader.readLine()) != null) {
-                    compileStringBuilder.append(compileMsgLine);
+                // 分批获取进程的正常输出
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(runProcess.getInputStream()));
+                List<String> outputStrList = new ArrayList<>();
+                // 逐行读取
+                String compileOutputLine;
+                while ((compileOutputLine = bufferedReader.readLine()) != null) {
+                    outputStrList.add(compileOutputLine);
                 }
-                executeMessage.setErrorMessage(compileStringBuilder.toString());
+                executeMessage.setMessage(StringUtils.join(outputStrList, '\n'));
 
+                // 分批获取进程的错误输出
+                BufferedReader errorBufferedReader = new BufferedReader(new InputStreamReader(runProcess.getErrorStream()));
+                // 逐行读取
+                List<String> errorOutputStrList = new ArrayList<>();
+                // 逐行读取
+                String errorCompileOutputLine;
+                while ((errorCompileOutputLine = errorBufferedReader.readLine()) != null) {
+                    errorOutputStrList.add(errorCompileOutputLine);
+                }
+                executeMessage.setErrorMessage(StringUtils.join(errorOutputStrList, '\n'));
             }
             stopWatch.stop();
             executeMessage.setTime(stopWatch.getLastTaskTimeMillis());
