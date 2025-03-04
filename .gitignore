@@ -32,3 +32,4 @@ build/
 ### VS Code ###
 .vscode/
 /tmpCode/
+/src/main/java/com/yupi/mojcodesandbox/demo/

@@ -1,4 +1,4 @@
-package com.yupi.mojcodesandbox.docker;
+package com.yupi.mojcodesandbox.demo;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerCmd;

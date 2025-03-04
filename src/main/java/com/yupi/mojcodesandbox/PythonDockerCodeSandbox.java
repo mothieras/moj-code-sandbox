@@ -3,7 +3,12 @@ package com.yupi.mojcodesandbox;
 import cn.hutool.core.util.ArrayUtil;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.*;
+import com.github.dockerjava.api.command.CreateContainerCmd;
+import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.command.PullImageCmd;
+import com.github.dockerjava.api.command.PullImageResultCallback;
+import com.github.dockerjava.api.command.StatsCmd;
 import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.model.*;
 import com.github.dockerjava.core.DockerClientBuilder;
@@ -12,6 +17,7 @@ import com.yupi.mojcodesandbox.model.ExecuteCodeRequest;
 import com.yupi.mojcodesandbox.model.ExecuteCodeResponse;
 import com.yupi.mojcodesandbox.model.ExecuteMessage;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StopWatch;
 
@@ -23,42 +29,36 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * java语言代码沙箱实现
+ * python语言代码沙箱实现
  */
 @Slf4j
 @Component
-public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
+@Deprecated
+public class PythonDockerCodeSandbox extends JavaCodeSandboxTemplate {
 
     /**
-     * 单次执行最大超时时间，单位秒。根据需要调整。
+     * 每条命令最大超时时间（秒），可根据需要调大或调小
      */
-    private static final long TIME_OUT = 5L;
+    private static final long TIME_OUT = 8L;
 
-    /**
-     * runFile：在一个容器中依次执行多条命令。
-     *
-     * @param userCodeFile 源代码文件
-     * @param inputList    多条命令参数，例如["", "arg1 arg2", ...]
-     * @return 各次执行的输出和信息
-     */
     @Override
     public List<ExecuteMessage> runFile(File userCodeFile, List<String> inputList) {
-        // 返回结果列表
         List<ExecuteMessage> executeMessageList = new ArrayList<>();
 
         // 1. 创建 DockerClient
         DockerClient dockerClient = DockerClientBuilder.getInstance().build();
-        String image = "openjdk:8-alpine"; // 示例镜像
+        // 2. 选择 Python 镜像
+        String image = "python:3.9-alpine";
 
-        // 2. 检查并拉取镜像（如有需要）
+        // 3. 检查并拉取镜像
         if (!isImageExists(dockerClient, image)) {
             pullImage(dockerClient, image);
         }
 
-        // 3. 创建容器
+        // 4. 创建容器并启动
         String containerId = createAndStartContainer(dockerClient, image, userCodeFile);
 
-        // 4. 启动 Stats 流，持续收集容器的内存峰值
+        // 5. 启动 Stats 流，持续收集容器的内存峰值
         final long[] maxMemoryUsed = {0L};
         StatsCmd statsCmd = dockerClient.statsCmd(containerId);
         ResultCallback<Statistics> statsCallback = new ResultCallback<Statistics>() {
@@ -91,13 +91,17 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
         };
         statsCmd.exec(statsCallback);
 
-        // 5. 多条命令循环执行
+        // 6. 在容器里循环执行多条命令
         for (String inputArgs : inputList) {
-            // 每条命令形如：java -cp /app Main [args...]
+            // 命令格式：python3 /app/main.py [arg1 arg2 ...]
             String[] args = inputArgs.trim().split("\\s+");
-            String[] cmdArray = ArrayUtil.append(new String[]{"java", "-cp", "/app", "Main"}, args);
+            // cmdArray: {"python3", "/app/main.py", arg1, arg2, ...}
+            String[] cmdArray = ArrayUtil.append(
+                    new String[]{"python3", "/app/main.py"},
+                    args
+            );
 
-            // 5.1 创建可执行命令
+            // 创建可执行命令
             ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(containerId)
                     .withCmd(cmdArray)
                     .withAttachStderr(true)
@@ -105,12 +109,12 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
                     .withAttachStdin(true)
                     .exec();
 
-            // 5.2 执行并收集输出
+            // 执行并收集输出
             ExecuteMessage execMsg = runCommandAndCollectOutput(dockerClient, execCreateCmdResponse.getId());
             executeMessageList.add(execMsg);
         }
 
-        // 6. 等待一小段时间，让 statsCmd 收到最后的统计信息
+        // 7. 等待一小段时间，让最后一次统计信息被推送
         try {
             Thread.sleep(300);
             statsCmd.close();
@@ -118,7 +122,7 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
             Thread.currentThread().interrupt();
         }
 
-        // 7. 停止并删除容器，避免资源泄露
+        // 8. 停止并删除容器
         try {
             dockerClient.stopContainerCmd(containerId).exec();
         } catch (Exception e) {
@@ -130,7 +134,7 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
             log.error("Remove container error:", e);
         }
 
-        // 8. 将 maxMemoryUsed[0] 设置到每条 ExecuteMessage 中（如有需要）
+        // 9. 将 maxMemoryUsed[0] 设置到每条 ExecuteMessage
         log.info("本次容器的最大内存使用：{} 字节", maxMemoryUsed[0]);
         for (ExecuteMessage message : executeMessageList) {
             message.setMemory(maxMemoryUsed[0]);
@@ -140,52 +144,43 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
     }
 
     /**
-     * 创建容器并启动
-     *
-     * @param dockerClient docker client
-     * @param image        镜像名称
-     * @param userCodeFile 用户代码文件
-     * @return 容器ID
+     * 创建并启动 Python 容器
      */
     private String createAndStartContainer(DockerClient dockerClient, String image, File userCodeFile) {
         String userCodeParentPath = userCodeFile.getParentFile().getAbsolutePath();
 
+        // 限制内存 256MB
         HostConfig hostConfig = new HostConfig()
                 .withBinds(new Bind(userCodeParentPath, new Volume("/app")))
-                .withMemory(1024L * 1024 * 256) // 256MB
+                .withMemory(256L * 1024 * 1024)
                 .withMemorySwap(0L)
                 .withCpuCount(1L)
                 .withReadonlyRootfs(true);
 
+        // 创建容器命令
         CreateContainerCmd containerCmd = dockerClient.createContainerCmd(image)
                 .withHostConfig(hostConfig)
                 .withAttachStderr(true)
                 .withAttachStdout(true)
                 .withAttachStdin(true)
                 .withNetworkDisabled(true)
-
                 .withTty(true);
 
         CreateContainerResponse exec = containerCmd.exec();
         String containerId = exec.getId();
-        log.info("创建容器成功，containerId = {}", containerId);
+        log.info("创建 Python 容器成功，containerId = {}", containerId);
 
         // 启动容器
         dockerClient.startContainerCmd(containerId).exec();
-        log.info("容器已启动");
+        log.info("Python 容器已启动");
         return containerId;
     }
 
     /**
      * 执行命令并收集输出、计时信息
-     *
-     * @param dockerClient docker client
-     * @param execId       ExecCreateCmdResponse 获取的命令ID
-     * @return ExecuteMessage
      */
     private ExecuteMessage runCommandAndCollectOutput(DockerClient dockerClient, String execId) {
         StopWatch stopWatch = new StopWatch();
-
         final StringBuilder outBuilder = new StringBuilder();
         final StringBuilder errBuilder = new StringBuilder();
 
@@ -271,9 +266,9 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
 
     @Override
     public ExecuteCodeResponse executeCode(ExecuteCodeRequest executeCodeRequest) {
-        log.info("--------Java代码沙箱开始执行----------");
+        log.info("--------Python 代码沙箱开始执行----------");
         ExecuteCodeResponse executeCodeResponse = super.executeCode(executeCodeRequest);
-        log.info("--------Java代码沙箱执行结束----------");
+        log.info("--------Python 代码沙箱执行结束----------");
         return executeCodeResponse;
     }
 }
