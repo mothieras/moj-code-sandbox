@@ -1,3 +1,11 @@
 server:
   port: 8090
 
+sandbox:
+  pool-size: 5
+  image: eclipse-temurin:8-jdk-alpine
+  timeout-seconds: 10
+  memory-limit: 268435456
+  cpu-count: 1
+  pids-limit: 64
+  borrow-timeout-seconds: 30
