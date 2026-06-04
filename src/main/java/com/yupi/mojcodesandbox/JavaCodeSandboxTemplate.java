@@ -34,24 +34,36 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
         // 1. 把用户代码保存为文件
         File userCodeFile = saveCodeToFile(code);
 
-        // 2.编译代码
-        ExecuteMessage compileFileExecuteMessage = compileFile(userCodeFile);
-        // 有问题则执行结束，返回编译失败信息
-        if (compileFileExecuteMessage.getExitVal() != 0) {
-            return ExecuteCodeResponse.builder().message(compileFileExecuteMessage.getErrorMessage()).build();
-        }
-        // 3.执行代码，得到输出结果
-        List<ExecuteMessage> executeMessages = runFile(userCodeFile, inputList);
+        try {
+            // 2. 编译代码
+            ExecuteMessage compileResult = compileFile(userCodeFile);
+            if (compileResult.getExitVal() != 0) {
+                // 编译失败，runResults 为空
+                return ExecuteCodeResponse.builder()
+                        .compileResult(compileResult)
+                        .runResults(List.of())
+                        .outputList(List.of())
+                        .message(compileResult.getErrorMessage())
+                        .judgeInfo(new JudgeInfo())
+                        .build();
+            }
 
-        // 4.收集整理输出结果
-        ExecuteCodeResponse outputResponse = getOutputResponse(executeMessages);
+            // 3. 执行代码
+            List<ExecuteMessage> runResults = runFile(userCodeFile, inputList);
 
-        // 5.文件清理
-        boolean b = deleteFile(userCodeFile);
-        if (!b) {
-            log.error("delete file error, userCodeFilePath = {}", userCodeFile.getAbsolutePath());
+            // 4. 收集输出
+            ExecuteCodeResponse outputResponse = getOutputResponse(runResults);
+            outputResponse.setCompileResult(compileResult);
+            outputResponse.setRunResults(runResults);
+
+            return outputResponse;
+        } finally {
+            // 5. 文件清理（编译失败也会执行）
+            boolean b = deleteFile(userCodeFile);
+            if (!b) {
+                log.error("delete file error, userCodeFilePath = {}", userCodeFile.getAbsolutePath());
+            }
         }
-        return outputResponse;
     }
 
 
