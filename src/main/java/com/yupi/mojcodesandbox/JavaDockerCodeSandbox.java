@@ -8,13 +8,17 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.StatsCmd;
 import com.github.dockerjava.api.model.Statistics;
 import com.yupi.mojcodesandbox.config.SandboxProperties;
+import com.yupi.mojcodesandbox.model.ExecuteCodeRequest;
+import com.yupi.mojcodesandbox.model.ExecuteCodeResponse;
 import com.yupi.mojcodesandbox.model.ExecuteMessage;
+import com.yupi.mojcodesandbox.model.JudgeInfo;
 import com.yupi.mojcodesandbox.pool.ContainerExecutor;
 import com.yupi.mojcodesandbox.pool.ContainerPool;
 import com.yupi.mojcodesandbox.pool.PooledContainer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,53 +34,69 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
     private final SandboxProperties props;
     private final DockerClient dockerClient;
 
-    /** 编译改到容器内进行（修雷2），这里跳过宿主机编译 */
     @Override
-    public ExecuteMessage compileFile(File userCodeFile) {
-        ExecuteMessage m = new ExecuteMessage();
-        m.setExitVal(0);
-        return m;
-    }
+    public ExecuteCodeResponse executeCode(ExecuteCodeRequest executeCodeRequest) {
+        List<String> inputList = executeCodeRequest.getInputList();
+        String code = executeCodeRequest.getCode();
 
-    @Override
-    public List<ExecuteMessage> runFile(File userCodeFile, List<String> inputList) {
-        List<ExecuteMessage> messages = new ArrayList<>();
+        // 1. 保存代码到宿主机
+        File userCodeFile = saveCodeToFile(code);
+
+        // 2. 借容器
         PooledContainer container;
         try {
             container = containerPool.borrow();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("借容器被中断", e);
+            deleteFile(userCodeFile);
+            return ExecuteCodeResponse.builder()
+                    .compileResult(null)
+                    .runResults(List.of())
+                    .outputList(List.of())
+                    .message("借容器被中断")
+                    .judgeInfo(new JudgeInfo())
+                    .build();
         }
 
         try {
-            // 1. 把源码写进容器专属工作目录
-            String code = FileUtil.readUtf8String(userCodeFile);
-            FileUtil.writeUtf8String(code, container.getHostWorkDir() + File.separator + "Main.java");
+            // 3. 写源码到容器
+            String codeContent = FileUtil.readUtf8String(userCodeFile);
+            FileUtil.writeUtf8String(codeContent,
+                    container.getHostWorkDir() + File.separator + "Main.java");
 
-            // 2. 容器内编译
+            // 4. 容器内编译
             ContainerExecutor.ExecResult compile = executor.exec(
                     container.getContainerId(), props.getTimeoutSeconds(),
                     "javac", "-encoding", "utf-8", "/box/Main.java");
+
+            ExecuteMessage compileResult = new ExecuteMessage();
+            compileResult.setExitVal((int) compile.getExitCode());
+            compileResult.setMessage(compile.getStdout());
+            compileResult.setErrorMessage(compile.getStderr() != null ? compile.getStderr() : "");
+
             if (compile.getExitCode() != 0) {
-                ExecuteMessage m = new ExecuteMessage();
-                m.setExitVal(1);
-                m.setErrorMessage(StrUtil.isBlank(compile.getStderr()) ? "编译失败" : compile.getStderr());
-                messages.add(m);
-                return messages;
+                return ExecuteCodeResponse.builder()
+                        .compileResult(compileResult)
+                        .runResults(List.of())
+                        .outputList(List.of())
+                        .message(StrUtil.isBlank(compile.getStderr()) ? "编译失败" : compile.getStderr())
+                        .judgeInfo(new JudgeInfo())
+                        .build();
             }
 
-            // 3. 开内存采样（用 getUsage() 采样取峰值，cgroup v2 也可用——修雷5）
+            // 5. 启动内存采样（必须在运行前开始）
             final long[] maxMem = {0L};
             StatsCmd statsCmd = dockerClient.statsCmd(container.getContainerId());
             statsCmd.exec(new ResultCallback.Adapter<Statistics>() {
-                @Override public void onNext(Statistics s) {
+                @Override
+                public void onNext(Statistics s) {
                     Long usage = (s.getMemoryStats() == null) ? null : s.getMemoryStats().getUsage();
                     if (usage != null) maxMem[0] = Math.max(maxMem[0], usage);
                 }
             });
 
-            // 4. 逐个输入运行
+            // 6. 逐用例执行
+            List<ExecuteMessage> runResults = new ArrayList<>();
             for (String inputArgs : inputList) {
                 String[] base = {"java", "-Djava.io.tmpdir=/box", "-cp", "/box", "Main"};
                 String[] cmd = StrUtil.isBlank(inputArgs)
@@ -89,6 +109,7 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
                 ExecuteMessage m = new ExecuteMessage();
                 m.setTime(r.getTimeMillis());
                 if (r.isTimeout()) {
+                    m.setTimeout(true);
                     m.setExitVal(1);
                     m.setErrorMessage("执行超时");
                 } else if (r.getExitCode() != 0) {
@@ -98,22 +119,31 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
                     m.setExitVal(0);
                     m.setMessage(r.getStdout());
                 }
-                messages.add(m);
+                runResults.add(m);
             }
 
+            // 7. 关闭内存采样，回填 memory
             try { Thread.sleep(200); statsCmd.close(); } catch (Exception ignored) {}
             log.info("本次容器内存峰值 {} 字节", maxMem[0]);
-            for (ExecuteMessage m : messages) m.setMemory(maxMem[0]);
-            return messages;
+            for (ExecuteMessage m : runResults) {
+                m.setMemory(maxMem[0]);
+            }
+
+            // 8. 收集输出
+            ExecuteCodeResponse response = getOutputResponse(runResults);
+            response.setCompileResult(compileResult);
+            response.setRunResults(runResults);
+            return response;
 
         } finally {
-            // 5. 清空工作目录（复用隔离）+ 还容器
+            // 9. 清空工作目录 + 还容器 + 清理宿主机文件
             try {
                 executor.exec(container.getContainerId(), 5, "sh", "-c", "rm -rf /box/*");
             } catch (Exception e) {
                 log.warn("清理工作目录失败 containerId={}", container.getContainerId(), e);
             }
             containerPool.giveBack(container);
+            deleteFile(userCodeFile);
         }
     }
 }
