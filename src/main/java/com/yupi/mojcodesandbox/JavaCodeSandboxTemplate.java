@@ -2,7 +2,6 @@ package com.yupi.mojcodesandbox;
 
 
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.util.StrUtil;
 import com.yupi.mojcodesandbox.model.ExecuteCodeRequest;
 import com.yupi.mojcodesandbox.model.ExecuteCodeResponse;
 import com.yupi.mojcodesandbox.model.ExecuteMessage;
@@ -134,25 +133,14 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
     }
 
     /**
-     * 4. 收集整理输出结果
-     *
-     * @param executeMessageList
-     * @return
+     * 4. 收集整理输出结果（纯数据聚合，不做错误分类）
      */
     public ExecuteCodeResponse getOutputResponse(List<ExecuteMessage> executeMessageList) {
         ExecuteCodeResponse executeCodeResponse = new ExecuteCodeResponse();
         List<String> outputList = new ArrayList<>();
-        // 取用时最大值，便于判断是否超时
         long maxTime = 0;
         long maxMemory = 0;
         for (ExecuteMessage executeMessage : executeMessageList) {
-            String errorMessage = executeMessage.getErrorMessage();
-            if (StrUtil.isNotBlank(errorMessage)) {
-                executeCodeResponse.setMessage(errorMessage);
-                //执行中存在错误
-                executeCodeResponse.setStatus(3);
-                break;
-            }
             outputList.add(executeMessage.getMessage());
             Long time = executeMessage.getTime();
             Long memory = executeMessage.getMemory();
@@ -163,14 +151,9 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
                 maxMemory = Math.max(maxMemory, memory);
             }
         }
-        // 正常运行完成
-        if (outputList.size() == executeMessageList.size()) {
-            executeCodeResponse.setStatus(1);
-        }
         executeCodeResponse.setOutputList(outputList);
 
         JudgeInfo judgeInfo = new JudgeInfo();
-
         judgeInfo.setTime(maxTime);
         judgeInfo.setMemory(maxMemory);
         executeCodeResponse.setJudgeInfo(judgeInfo);
