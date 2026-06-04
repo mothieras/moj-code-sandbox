@@ -12,5 +12,6 @@ public class ExecuteMessage {
     private String errorMessage;
     private Long time;
     private Long memory;
-    private Boolean timeout;    // 新增：是否超时
+    /** 是否超时 */
+    private Boolean timeout;
 }

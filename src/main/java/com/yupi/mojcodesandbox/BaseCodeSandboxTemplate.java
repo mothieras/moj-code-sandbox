@@ -1,7 +1,6 @@
 package com.yupi.mojcodesandbox;
 
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.util.StrUtil;
 import com.yupi.mojcodesandbox.model.*;
 import com.yupi.mojcodesandbox.utils.ProcessUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,39 +24,46 @@ public abstract class BaseCodeSandboxTemplate implements CodeSandbox {
     // 覆盖 executeCode，提供通用模板
     @Override
     public ExecuteCodeResponse executeCode(ExecuteCodeRequest request) {
+        File userCodeFile = null;
         try {
             // 1) 根据语言获取配置
             LanguageConfig langConfig = LanguageConfig.of(request.getLanguage());
 
             // 2) 保存代码为文件
-            File userCodeFile = saveCodeToFile(request.getCode(), langConfig);
+            userCodeFile = saveCodeToFile(request.getCode(), langConfig);
 
             // 3) 编译 (如果需要)
             ExecuteMessage compileResult = compileFileIfNeeded(userCodeFile, langConfig);
             if (compileResult.getExitVal() != 0) {
-                // 编译失败
                 return ExecuteCodeResponse.builder()
-                        .status(3)
+                        .compileResult(compileResult)
+                        .runResults(Collections.emptyList())
+                        .outputList(Collections.emptyList())
                         .message(compileResult.getErrorMessage())
+                        .status(3)
+                        .judgeInfo(new JudgeInfo())
                         .build();
             }
 
             // 4) 运行
-            List<ExecuteMessage> runMsgs = runFile(userCodeFile, request.getInputList(), langConfig);
+            List<ExecuteMessage> runResults = runFile(userCodeFile, request.getInputList(), langConfig);
 
             // 5) 收集输出
-            ExecuteCodeResponse outputResponse = getOutputResponse(runMsgs);
-
-            // 6) 清理文件
-            boolean delOk = deleteFile(userCodeFile);
-            if (!delOk) {
-                log.error("delete file error, userCodeFilePath = {}", userCodeFile.getAbsolutePath());
-            }
+            ExecuteCodeResponse outputResponse = getOutputResponse(runResults);
+            outputResponse.setCompileResult(compileResult);
+            outputResponse.setRunResults(runResults);
 
             return outputResponse;
         } catch (Exception e) {
-
             return someErrorResponse(e);
+        } finally {
+            // 6) 清理文件
+            if (userCodeFile != null) {
+                boolean delOk = deleteFile(userCodeFile);
+                if (!delOk) {
+                    log.error("delete file error, userCodeFilePath = {}", userCodeFile.getAbsolutePath());
+                }
+            }
         }
     }
 
@@ -157,26 +164,14 @@ public abstract class BaseCodeSandboxTemplate implements CodeSandbox {
     }
 
     /**
-     * 收集执行信息
-     *
-     * @param executeMessageList
-     * @return
+     * 收集整理输出结果（纯数据聚合，不做错误分类）
      */
     protected ExecuteCodeResponse getOutputResponse(List<ExecuteMessage> executeMessageList) {
-        // 收集最大用时、最大内存、输出列表
         ExecuteCodeResponse executeCodeResponse = new ExecuteCodeResponse();
         List<String> outputList = new ArrayList<>();
-        // 取用时最大值，便于判断是否超时
         long maxTime = 0;
         long maxMemory = 0;
         for (ExecuteMessage executeMessage : executeMessageList) {
-            String errorMessage = executeMessage.getErrorMessage();
-            if (StrUtil.isNotBlank(errorMessage)) {
-                executeCodeResponse.setMessage(errorMessage);
-                //执行中存在错误
-                executeCodeResponse.setStatus(3);
-                break;
-            }
             outputList.add(executeMessage.getMessage());
             Long time = executeMessage.getTime();
             Long memory = executeMessage.getMemory();
@@ -187,14 +182,10 @@ public abstract class BaseCodeSandboxTemplate implements CodeSandbox {
                 maxMemory = Math.max(maxMemory, memory);
             }
         }
-        // 正常运行完成
-        if (outputList.size() == executeMessageList.size()) {
-            executeCodeResponse.setStatus(1);
-        }
         executeCodeResponse.setOutputList(outputList);
+        executeCodeResponse.setStatus(1);
 
         JudgeInfo judgeInfo = new JudgeInfo();
-
         judgeInfo.setTime(maxTime);
         judgeInfo.setMemory(maxMemory);
         executeCodeResponse.setJudgeInfo(judgeInfo);
@@ -225,12 +216,13 @@ public abstract class BaseCodeSandboxTemplate implements CodeSandbox {
      * @return
      */
     private ExecuteCodeResponse someErrorResponse(Exception e) {
-        ExecuteCodeResponse executeCodeResponse = new ExecuteCodeResponse();
-        executeCodeResponse.setOutputList(new ArrayList<>());
-        executeCodeResponse.setMessage(e.getMessage());
-        // 表示代码沙箱错误
-        executeCodeResponse.setStatus(2);
-        executeCodeResponse.setJudgeInfo(new JudgeInfo());
-        return executeCodeResponse;
+        return ExecuteCodeResponse.builder()
+                .compileResult(null)
+                .runResults(Collections.emptyList())
+                .outputList(Collections.emptyList())
+                .message(e.getMessage())
+                .status(2)
+                .judgeInfo(new JudgeInfo())
+                .build();
     }
 }

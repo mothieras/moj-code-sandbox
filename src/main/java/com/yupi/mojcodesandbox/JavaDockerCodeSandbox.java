@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Java 代码沙箱：容器池复用实现 */
@@ -51,9 +52,10 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
             deleteFile(userCodeFile);
             return ExecuteCodeResponse.builder()
                     .compileResult(null)
-                    .runResults(List.of())
-                    .outputList(List.of())
+                    .runResults(Collections.emptyList())
+                    .outputList(Collections.emptyList())
                     .message("借容器被中断")
+                    .status(2)
                     .judgeInfo(new JudgeInfo())
                     .build();
         }
@@ -77,9 +79,10 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
             if (compile.getExitCode() != 0) {
                 return ExecuteCodeResponse.builder()
                         .compileResult(compileResult)
-                        .runResults(List.of())
-                        .outputList(List.of())
+                        .runResults(Collections.emptyList())
+                        .outputList(Collections.emptyList())
                         .message(StrUtil.isBlank(compile.getStderr()) ? "编译失败" : compile.getStderr())
+                        .status(3)
                         .judgeInfo(new JudgeInfo())
                         .build();
             }

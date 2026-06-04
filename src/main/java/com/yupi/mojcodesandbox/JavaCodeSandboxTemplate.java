@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,9 +42,10 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
                 // 编译失败，runResults 为空
                 return ExecuteCodeResponse.builder()
                         .compileResult(compileResult)
-                        .runResults(List.of())
-                        .outputList(List.of())
+                        .runResults(Collections.emptyList())
+                        .outputList(Collections.emptyList())
                         .message(compileResult.getErrorMessage())
+                        .status(3)
                         .judgeInfo(new JudgeInfo())
                         .build();
             }
@@ -164,6 +166,7 @@ public abstract class JavaCodeSandboxTemplate implements CodeSandbox {
             }
         }
         executeCodeResponse.setOutputList(outputList);
+        executeCodeResponse.setStatus(1);
 
         JudgeInfo judgeInfo = new JudgeInfo();
         judgeInfo.setTime(maxTime);
