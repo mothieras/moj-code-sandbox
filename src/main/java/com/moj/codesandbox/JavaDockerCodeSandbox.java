@@ -37,8 +37,18 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
 
     @Override
     public ExecuteCodeResponse executeCode(ExecuteCodeRequest executeCodeRequest) {
-        List<String> inputList = executeCodeRequest.getInputList();
         String code = executeCodeRequest.getCode();
+        List<String> inputList = executeCodeRequest.getInputList() != null
+                ? executeCodeRequest.getInputList()
+                : Collections.emptyList();
+
+        if (StrUtil.isBlank(code)) {
+            return ExecuteCodeResponse.builder()
+                    .message("代码为空")
+                    .status(2)
+                    .judgeInfo(new JudgeInfo())
+                    .build();
+        }
 
         // 1. 保存代码到宿主机
         File userCodeFile = saveCodeToFile(code);
