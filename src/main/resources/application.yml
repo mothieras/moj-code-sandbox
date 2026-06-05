@@ -4,7 +4,7 @@ server:
 sandbox:
   auth-secret: secretKey
   pool-size: 5
-  image: amazoncorretto:8-alpine
+  image: amazoncorretto:17-alpine
   timeout-seconds: 10
   memory-limit: 268435456
   cpu-count: 1

@@ -145,6 +145,12 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
 
             // 8. 收集输出
             ExecuteCodeResponse response = getOutputResponse(runResults);
+            boolean hasError = runResults.stream().anyMatch(m ->
+                    Boolean.TRUE.equals(m.getTimeout())
+                            || (m.getExitVal() != null && m.getExitVal() != 0));
+            if (hasError) {
+                response.setStatus(3);
+            }
             response.setCompileResult(compileResult);
             response.setRunResults(runResults);
             return response;
@@ -153,10 +159,11 @@ public class JavaDockerCodeSandbox extends JavaCodeSandboxTemplate {
             // 9. 清空工作目录 + 还容器 + 清理宿主机文件
             try {
                 executor.exec(container.getContainerId(), 5, "sh", "-c", "rm -rf /box/*");
+                containerPool.giveBack(container);
             } catch (Exception e) {
-                log.warn("清理工作目录失败 containerId={}", container.getContainerId(), e);
+                log.warn("清理工作目录失败，销毁容器 containerId={}", container.getContainerId(), e);
+                containerPool.replace(container);
             }
-            containerPool.giveBack(container);
             deleteFile(userCodeFile);
         }
     }

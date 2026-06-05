@@ -65,4 +65,59 @@ class ContainerPoolTest {
         assertNotEquals(first.getContainerId(), replaced.getContainerId()); // 换了新的
         assertEquals(2, p.created.get());
     }
+
+    @Test
+    void giveBack_unhealthy_container_is_replaced() throws Exception {
+        FakeProvider p = new FakeProvider();
+        ContainerPool pool = new ContainerPool(p, 1, 1);
+        pool.warmUp();
+        PooledContainer c = pool.borrow();
+        p.destroy(c);               // mark as unhealthy
+        pool.giveBack(c);           // should detect unhealthy → replace
+        assertEquals(2, p.created.get()); // original + replacement
+        PooledContainer c2 = pool.borrow();
+        assertNotEquals(c.getContainerId(), c2.getContainerId());
+        assertTrue(p.isHealthy(c2));
+    }
+
+    @Test
+    void giveBack_healthy_container_returns_to_pool() throws Exception {
+        FakeProvider p = new FakeProvider();
+        ContainerPool pool = new ContainerPool(p, 1, 1);
+        pool.warmUp();
+        PooledContainer c = pool.borrow();
+        // keep it healthy
+        pool.giveBack(c);
+        PooledContainer c2 = pool.borrow();
+        assertEquals(c.getContainerId(), c2.getContainerId());
+        assertEquals(1, p.created.get());
+    }
+
+    @Test
+    void replace_public_method_works() throws Exception {
+        FakeProvider p = new FakeProvider();
+        ContainerPool pool = new ContainerPool(p, 1, 1);
+        pool.warmUp();
+        PooledContainer c = pool.borrow();
+        pool.replace(c);           // directly call replace
+        assertEquals(2, p.created.get()); // original + replacement
+        PooledContainer c2 = pool.borrow();
+        assertNotEquals(c.getContainerId(), c2.getContainerId());
+        assertTrue(p.isHealthy(c2));
+    }
+
+    @Test
+    void borrow_after_three_bad_containers_throws() {
+        FakeProvider alwaysBad = new FakeProvider() {
+            @Override public boolean isHealthy(PooledContainer c) { return false; }
+        };
+        ContainerPool pool = new ContainerPool(alwaysBad, 1, 1);
+        pool.warmUp();
+        RuntimeException ex = assertThrows(RuntimeException.class, pool::borrow);
+        assertTrue(
+            ex.getMessage().contains("连续替换失败") || ex.getMessage().contains("容器池可能不可用"),
+            "Expected message about repeated replacement failure, got: " + ex.getMessage()
+        );
+        assertEquals(4, alwaysBad.created.get()); // 1 warmUp + 3 replacements
+    }
 }
