@@ -36,4 +36,4 @@ build/
 ### AI / 工具配置 ###
 .cursor/
 .codegraph/
-/src/main/java/com/yupi/mojcodesandbox/demo/
+/src/main/java/com/moj/codesandbox/demo/

@@ -1,4 +1,4 @@
-package com.yupi.mojcodesandbox.unsafe;
+package com.moj.codesandbox.unsafe;
 
 /**
  * 无限睡眠

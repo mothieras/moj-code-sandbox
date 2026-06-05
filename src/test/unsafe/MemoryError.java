@@ -1,4 +1,4 @@
-package com.yupi.mojcodesandbox.unsafe;
+package com.moj.codesandbox.unsafe;
 
 import java.util.ArrayList;
 import java.util.List;

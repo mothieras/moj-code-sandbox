@@ -3,7 +3,7 @@ server:
 
 sandbox:
   pool-size: 5
-  image: eclipse-temurin:8-jdk-alpine
+  image: amazoncorretto:8-alpine
   timeout-seconds: 10
   memory-limit: 268435456
   cpu-count: 1
