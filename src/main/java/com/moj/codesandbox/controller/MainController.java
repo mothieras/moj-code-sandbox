@@ -1,9 +1,10 @@
 package com.moj.codesandbox.controller;
 
-import com.moj.codesandbox.JavaDockerCodeSandbox;
+import com.moj.codesandbox.DockerCodeSandbox;
 import com.moj.codesandbox.model.ExecuteCodeRequest;
 import com.moj.codesandbox.model.ExecuteCodeResponse;
 import com.moj.codesandbox.model.JudgeInfo;
+import com.moj.codesandbox.model.LanguageConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,13 +21,13 @@ public class MainController {
     private static final int MAX_INPUT_LIST_SIZE = 100;
     private static final int MAX_CODE_LENGTH = 64 * 1024;
     private static final int MAX_INPUT_LENGTH = 10000;
-    private static final Set<String> ALLOWED_LANGUAGES = Set.of("java");
+    private static final Set<String> ALLOWED_LANGUAGES = LanguageConfig.supportedLanguageNames();
 
     @Value("${sandbox.auth-secret:secretKey}")
     private String authSecret;
 
     @Resource
-    private JavaDockerCodeSandbox javaDockerCodeSandbox;
+    private DockerCodeSandbox dockerCodeSandbox;
 
     @GetMapping("/health")
     public String healthCheck() {
@@ -66,7 +67,7 @@ public class MainController {
                 return errorResponse("单条输入长度超过限制(" + MAX_INPUT_LENGTH + ")");
             }
         }
-        return javaDockerCodeSandbox.executeCode(executeCodeRequest);
+        return dockerCodeSandbox.executeCode(executeCodeRequest);
     }
 
     private ExecuteCodeResponse errorResponse(String message) {

@@ -10,8 +10,6 @@ import org.springframework.stereotype.Component;
 public class SandboxProperties {
     /** 容器池大小 */
     private int poolSize = 5;
-    /** 运行镜像 */
-    private String image = "amazoncorretto:8-alpine";
     /** 单次执行硬超时（秒） */
     private long timeoutSeconds = 10;
     /** 内存硬上限（字节），默认 256MB */

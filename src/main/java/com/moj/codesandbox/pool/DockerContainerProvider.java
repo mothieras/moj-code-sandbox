@@ -6,21 +6,30 @@ import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.model.*;
 import com.github.dockerjava.core.command.PullImageResultCallback;
 import com.moj.codesandbox.config.SandboxProperties;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
+
 import java.io.File;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 按指定镜像创建/销毁/健康检查常驻容器。
+ * 每种语言对应一个实例（由 ContainerPoolManager 懒加载时构造），各自缓存镜像就绪状态。
+ */
 @Slf4j
-@Component
-@RequiredArgsConstructor
 public class DockerContainerProvider implements ContainerProvider {
 
     private final DockerClient dockerClient;
     private final SandboxProperties props;
+    private final String image;
     private volatile boolean imageReady = false;
+
+    public DockerContainerProvider(DockerClient dockerClient, SandboxProperties props, String image) {
+        this.dockerClient = dockerClient;
+        this.props = props;
+        this.image = image;
+    }
 
     @Override
     public PooledContainer create() {
@@ -39,9 +48,11 @@ public class DockerContainerProvider implements ContainerProvider {
                 .withMemorySwap(props.getMemoryLimit())   // ==memory 才真正禁 swap
                 .withCpuCount(props.getCpuCount())
                 .withPidsLimit(props.getPidsLimit())      // 防 fork 炸弹
-                .withReadonlyRootfs(true);                // 根文件系统只读，仅 /box 可写
+                .withReadonlyRootfs(true)                 // 根文件系统只读，仅 /box 可写
+                .withSecurityOpts(List.of("no-new-privileges:true"))  // 禁止提权
+                .withCapDrop(Capability.ALL);             // 丢弃所有 Linux capabilities
 
-        CreateContainerResponse resp = dockerClient.createContainerCmd(props.getImage())
+        CreateContainerResponse resp = dockerClient.createContainerCmd(image)
                 .withHostConfig(hostConfig)
                 .withNetworkDisabled(true)                // 禁网
                 .withUser("nobody")                       // 非 root
@@ -49,7 +60,7 @@ public class DockerContainerProvider implements ContainerProvider {
                 .withTty(false)                           // 不开 TTY，保证 exec 能分流 stdout/stderr
                 .exec();
         dockerClient.startContainerCmd(resp.getId()).exec();
-        log.info("常驻容器已启动 containerId={}", resp.getId());
+        log.info("常驻容器已启动 image={} containerId={}", image, resp.getId());
         return new PooledContainer(resp.getId(), hostWorkDir);
     }
 
@@ -76,11 +87,10 @@ public class DockerContainerProvider implements ContainerProvider {
         if (imageReady) return;
         synchronized (this) {
             if (imageReady) return;
-            String image = props.getImage();
             List<Image> images = dockerClient.listImagesCmd().exec();
             boolean exists = images.stream()
                     .filter(i -> i.getRepoTags() != null)
-                    .flatMap(i -> java.util.Arrays.stream(i.getRepoTags()))
+                    .flatMap(i -> Arrays.stream(i.getRepoTags()))
                     .anyMatch(image::equals);
             if (!exists) {
                 log.info("拉取镜像 {}", image);

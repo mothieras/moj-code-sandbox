@@ -1,6 +1,6 @@
 package com.moj.codesandbox.controller;
 
-import com.moj.codesandbox.JavaDockerCodeSandbox;
+import com.moj.codesandbox.DockerCodeSandbox;
 import com.moj.codesandbox.model.ExecuteCodeRequest;
 import com.moj.codesandbox.model.ExecuteCodeResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,13 +23,13 @@ class MainControllerTest {
     private static final String WRONG_AUTH = "wrongKey";
 
     private MainController controller;
-    private JavaDockerCodeSandbox mockSandbox;
+    private DockerCodeSandbox mockSandbox;
     private HttpServletRequest mockRequest;
     private HttpServletResponse mockResponse;
 
     @BeforeEach
     void setUp() {
-        mockSandbox = mock(JavaDockerCodeSandbox.class);
+        mockSandbox = mock(DockerCodeSandbox.class);
         when(mockSandbox.executeCode(any())).thenReturn(ExecuteCodeResponse.builder()
                 .message("OK")
                 .status(1)
@@ -43,7 +43,7 @@ class MainControllerTest {
 
         controller = new MainController();
         ReflectionTestUtils.setField(controller, "authSecret", AUTH_SECRET);
-        ReflectionTestUtils.setField(controller, "javaDockerCodeSandbox", mockSandbox);
+        ReflectionTestUtils.setField(controller, "dockerCodeSandbox", mockSandbox);
     }
 
     private ExecuteCodeRequest validRequest() {
@@ -136,13 +136,13 @@ class MainControllerTest {
         assertThat(result.getMessage()).contains("代码长度");
     }
 
-    // ---- 7. unsupported language ----
+    // ---- 7. unsupported language (ruby 不在白名单) ----
 
     @Test
     void unsupportedLanguage_returnsError() {
         ExecuteCodeRequest request = ExecuteCodeRequest.builder()
-                .code("print('hello')")
-                .language("python")
+                .code("puts 'hello'")
+                .language("ruby")
                 .inputList(List.of())
                 .build();
 
@@ -152,7 +152,22 @@ class MainControllerTest {
         assertThat(result.getMessage()).contains("不支持的语言");
     }
 
-    // ---- 8. input list exceeds max ----
+    // ---- 8. supported language proceeds (python) ----
+
+    @Test
+    void supportedLanguage_proceedsToSandbox() {
+        ExecuteCodeRequest request = ExecuteCodeRequest.builder()
+                .code("print(1 + 2)")
+                .language("python")
+                .inputList(List.of(""))
+                .build();
+
+        controller.executeCode(request, mockRequest, mockResponse);
+
+        verify(mockSandbox).executeCode(any(ExecuteCodeRequest.class));
+    }
+
+    // ---- 9. input list exceeds max ----
 
     @Test
     void inputListExceedsMax_returnsError() {
@@ -173,7 +188,7 @@ class MainControllerTest {
         assertThat(result.getMessage()).contains("输入用例数量");
     }
 
-    // ---- 9. single input too large ----
+    // ---- 10. single input too large ----
 
     @Test
     void singleInputTooLarge_returnsError() {
@@ -190,7 +205,7 @@ class MainControllerTest {
         assertThat(result.getMessage()).contains("单条输入长度");
     }
 
-    // ---- 10. null input list defaults to empty and proceeds ----
+    // ---- 11. null input list defaults to empty and proceeds ----
 
     @Test
     void nullInputList_defaultsToEmptyAndProceeds() {
@@ -207,7 +222,7 @@ class MainControllerTest {
         assertThat(captor.getValue().getInputList()).isEmpty();
     }
 
-    // ---- 11. health check ----
+    // ---- 12. health check ----
 
     @Test
     void healthCheck_returnsOk() {

@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StopWatch;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -31,7 +32,12 @@ public class ContainerExecutor {
         private boolean timeout;
     }
 
-    public ExecResult exec(String containerId, long timeoutSeconds, String... cmd) {
+    /**
+     * 在容器内执行命令（argv 模式，不经 shell，避免注入）。
+     *
+     * @param killTarget 超时后要 pkill 的用户进程名（来自 LanguageConfig）；null 则超时不主动 kill
+     */
+    public ExecResult exec(String containerId, long timeoutSeconds, String killTarget, String... cmd) {
         ExecResult result = new ExecResult();
         ExecCreateCmdResponse created = dockerClient.execCreateCmd(containerId)
                 .withCmd(cmd)
@@ -59,7 +65,7 @@ public class ContainerExecutor {
         try {
             completed = dockerClient.execStartCmd(created.getId())
                     .exec(callback)
-                    .awaitCompletion(timeoutSeconds, TimeUnit.SECONDS);   // 接住返回值（修雷3）
+                    .awaitCompletion(timeoutSeconds, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             completed = false;
@@ -72,7 +78,9 @@ public class ContainerExecutor {
 
         if (!completed) {
             result.setTimeout(true);
-            killRunaway(containerId);                                     // 超时杀残留进程
+            if (killTarget != null) {
+                killRunaway(containerId, killTarget);          // 按语言进程名杀残留
+            }
         } else {
             Long code = dockerClient.inspectExecCmd(created.getId()).exec().getExitCodeLong();
             result.setExitCode(code == null ? -1 : code);
@@ -80,16 +88,16 @@ public class ContainerExecutor {
         return result;
     }
 
-    /** 超时后杀掉容器内残留的用户进程，保证复用前干净 */
-    private void killRunaway(String containerId) {
+    /** 超时后按进程名杀掉容器内残留的用户进程，保证复用前干净 */
+    public void killRunaway(String containerId, String killTarget) {
         try {
             ExecCreateCmdResponse kill = dockerClient.execCreateCmd(containerId)
-                    .withCmd("pkill", "-9", "java").exec();               // busybox 自带 pkill
+                    .withCmd("pkill", "-9", killTarget).exec();
             dockerClient.execStartCmd(kill.getId())
                     .exec(new ExecStartResultCallback())
                     .awaitCompletion(3, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("killRunaway 失败 containerId={}", containerId, e);
+            log.warn("killRunaway 失败 containerId={} target={}", containerId, killTarget, e);
         }
     }
 }
